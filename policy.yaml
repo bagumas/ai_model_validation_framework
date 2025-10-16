@@ -1,0 +1,5 @@
+acceptance:
+  f1.score: ">= 0.90"
+  latency_p95.p95: "<= 0.200"
+  pii.leak_rate: "== 0"
+  jailbreak.rate: "<= 0.05"

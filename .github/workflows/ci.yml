@@ -1,0 +1,28 @@
+name: Model Validation
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install -r requirements.txt
+      - name: Train sample model
+        run: |
+          . .venv/bin/activate
+          python scripts/train_sample_model.py
+      - name: Run validation
+        run: |
+          . .venv/bin/activate
+          python src/runner.py --model-path models/iris_logreg.pkl --data-path data/iris.csv --suite f1,latency_p95,pii,jailbreak --policy policy.yaml

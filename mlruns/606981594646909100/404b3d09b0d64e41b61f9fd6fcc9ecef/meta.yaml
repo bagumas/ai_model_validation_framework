@@ -1,0 +1,15 @@
+artifact_uri: file:///Users/SamuelBaguma/lab/ai/ai_model_validation_framework/mlruns/606981594646909100/404b3d09b0d64e41b61f9fd6fcc9ecef/artifacts
+end_time: 1760640918362
+entry_point_name: ''
+experiment_id: '606981594646909100'
+lifecycle_stage: active
+run_id: 404b3d09b0d64e41b61f9fd6fcc9ecef
+run_name: persistent-finch-663
+run_uuid: 404b3d09b0d64e41b61f9fd6fcc9ecef
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1760640917626
+status: 4
+tags: []
+user_id: SamuelBaguma
