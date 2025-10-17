@@ -2,7 +2,6 @@ pipeline {
   agent {
     docker {
       image 'python:3.11-slim'
-      // Lets the container talk to MLflow running on your host via Docker Desktop
       args '--add-host=host.docker.internal:host-gateway'
       reuseNode true
     }
@@ -15,16 +14,7 @@ pipeline {
   }
 
   triggers {
-    // Nightly run (hashed hour) so the job validates regularly
     cron('H H * * *')
-  }
-
-  environment {
-    // Point training/validation to your local MLflow server
-    MLFLOW_TRACKING_URI = 'http://host.docker.internal:5000'
-    PYTHONUNBUFFERED    = '1'
-    PIP_DISABLE_PIP_VERSION_CHECK = '1'
-    DEBIAN_FRONTEND     = 'noninteractive'
   }
 
   parameters {
@@ -32,6 +22,19 @@ pipeline {
     booleanParam(name: 'ENABLE_JAILBREAK', defaultValue: false, description: 'Include jailbreak gate')
     string(name: 'SUITE', defaultValue: 'f1,latency_p95,pii', description: 'Validation evaluators (comma-separated)')
     string(name: 'POLICY', defaultValue: 'policy.yaml', description: 'Policy file path')
+  }
+
+  environment {
+    MLFLOW_TRACKING_URI = 'http://host.docker.internal:5000'
+    PYTHONUNBUFFERED    = '1'
+    PIP_DISABLE_PIP_VERSION_CHECK = '1'
+    DEBIAN_FRONTEND     = 'noninteractive'
+
+    // 👇 Explicitly map params -> env so they exist in the container
+    GIT_BRANCH          = "${params.GIT_BRANCH}"
+    ENABLE_JAILBREAK    = "${params.ENABLE_JAILBREAK}"
+    SUITE               = "${params.SUITE}"
+    POLICY              = "${params.POLICY}"
   }
 
   stages {
@@ -43,9 +46,9 @@ pipeline {
           branches: [[name: "*/${params.GIT_BRANCH}"]],
           userRemoteConfigs: [[url: 'https://github.com/bagumas/ai_model_validation_framework.git']]
         ])
-        // If Jenkins tried git outside the container earlier, this guarantees we have git here
+        // Ensure git is available inside the container (some images don’t have it)
         sh '''
-          set -eux
+          set -euo pipefail
           apt-get update
           apt-get install -y --no-install-recommends git
           git --version || true
@@ -56,7 +59,7 @@ pipeline {
     stage('Setup Python') {
       steps {
         sh '''
-          set -eux
+          set -euo pipefail
           python -m pip install --upgrade pip setuptools wheel
           pip install -r requirements.txt
         '''
@@ -66,7 +69,7 @@ pipeline {
     stage('Train Sample Model') {
       steps {
         sh '''
-          set -eux
+          set -euo pipefail
           python scripts/train_sample_model.py
         '''
       }
@@ -75,29 +78,32 @@ pipeline {
     stage('Validate (Policy Gates)') {
       steps {
         sh '''
-          set -eux
-
+          set -euo pipefail
           export PYTHONPATH=src
 
-          # Compose suite (optionally append jailbreak)
-          SUITE="${SUITE}"
-          if [ "${ENABLE_JAILBREAK}" = "true" ]; then
-            SUITE="${SUITE},jailbreak"
+          # Safe defaults even with `set -u`
+          SUITE_VAL="${SUITE:-f1,latency_p95,pii}"
+          POLICY_FILE="${POLICY:-policy.yaml}"
+          ENABLE_JB="${ENABLE_JAILBREAK:-false}"
+
+          if [ "${ENABLE_JB}" = "true" ]; then
+            SUITE_VAL="${SUITE_VAL},jailbreak"
           fi
-          echo "Using suite: ${SUITE}"
+          echo "Using suite: ${SUITE_VAL}"
+          echo "Using policy: ${POLICY_FILE}"
 
           # Tag run with Git + Jenkins metadata (readable by MLflow)
           COMMIT=$(git rev-parse --short HEAD || echo "unknown")
           export MLFLOW_TAG_GIT_SHA="${COMMIT}"
-          export MLFLOW_TAG_JOB="${JOB_NAME}"
-          export MLFLOW_TAG_BUILD="${BUILD_NUMBER}"
+          export MLFLOW_TAG_JOB="${JOB_NAME:-validation}"
+          export MLFLOW_TAG_BUILD="${BUILD_NUMBER:-0}"
 
           # Run validation and capture output so we can extract the MLflow run URL
           python src/runner.py \
             --model-path models/iris_logreg.pkl \
             --data-path data/iris.csv \
-            --suite "${SUITE}" \
-            --policy "${POLICY}" 2>&1 | tee runner_output.log
+            --suite "${SUITE_VAL}" \
+            --policy "${POLICY_FILE}" 2>&1 | tee runner_output.log
 
           # Best-effort: extract the run URL from MLflow client logs
           awk -F'at: ' '/View run/ {print $2}' runner_output.log | sed 's/[[:space:]]*\\.*$//' | tail -n1 > mlflow_run_url.txt || true
