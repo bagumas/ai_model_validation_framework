@@ -2,24 +2,27 @@ pipeline {
   agent {
     docker {
       image 'python:3.11-slim'
-      // only keep the host alias so the build container can reach MLflow
-      args '--add-host=host.docker.internal:host-gateway'
+      args '--add-host=host.docker.internal:host-gateway -v $HOME/.cache/pip:/root/.cache/pip'
     }
   }
+
+  options {
+    skipDefaultCheckout(true)   // <— stop the implicit checkout
+  }
+
   environment {
     PYTHONUNBUFFERED = '1'
     MLFLOW_TRACKING_URI = 'http://host.docker.internal:5000'
-    // cache lives under the workspace, which is already volume-shared
-    PIP_CACHE_DIR = "${env.WORKSPACE}/.pip-cache"
   }
-  options { skipDefaultCheckout(true) }
+
   stages {
     stage('Checkout') {
       steps {
-        deleteDir()
-        checkout scm
+        deleteDir()             // <— clean workspace
+        checkout scm            // <— do a full checkout now
       }
     }
+
     stage('Setup Python') {
       steps {
         sh '''
@@ -28,9 +31,11 @@ pipeline {
         '''
       }
     }
+
     stage('Train Sample Model') {
       steps { sh 'python scripts/train_sample_model.py' }
     }
+
     stage('Validate (Policy Gates)') {
       steps {
         sh '''
@@ -44,10 +49,14 @@ pipeline {
       }
     }
   }
+
   post {
     always {
-      // ensure we still have a node/workspace context
-      archiveArtifacts artifacts: 'mlruns/**/*, **/report.txt', allowEmptyArchive: true
+      // When earlier stages abort, ensure we still have a node/workspace context
+      script {
+        sh 'ls -R mlruns || true'
+        archiveArtifacts artifacts: 'mlruns/**/*, **/report.txt', allowEmptyArchive: true
+      }
     }
   }
 }
