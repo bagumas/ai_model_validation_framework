@@ -11,7 +11,11 @@ services:
     volumes:
       - jenkins_home:/var/jenkins_home
       - /var/run/docker.sock:/var/run/docker.sock   # let Jenkins control Docker
-    # Give pipelines a stable host alias to reach MLflow from their ephemeral build containers
+    
+    # Run Jenkins as root to bypass docker.sock permission issues
+    user: "0:0" 
+
+   # Give pipelines a stable host alias to reach MLflow from their ephemeral build containers
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
